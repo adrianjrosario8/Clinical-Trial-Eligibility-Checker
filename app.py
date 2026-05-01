@@ -1,96 +1,176 @@
 import streamlit as st
+import json
+import pandas as pd
 from llm_utils import get_eligibility_response
 
 
-def rule_engine(p):
-    reasons = []
+# Prompt
 
-    if p["diagnosis"] != "Type 2":
-        reasons.append("Diabetes type is not Type 2")
+def build_prompt(p):
+    return f""" 
+Check eligibility: 
 
-    if p["heart_failure"] == "Yes":
-        reasons.append("Heart failure present")
+Inclusion:
+- Age >= 19
+- Type 2 Diabetes
+- Glucose <= 270
+- BMI 18.5-40
 
-    if p["infection"] == "Yes":
-        reasons.append("Infection present")
+Exclusion:
+- Type 1 or gestational diabetes
+- Severe heart failure
+- Severe infection
+- Lung disease
 
-    if p["lung_disease"] == "Yes":
-        reasons.append("Lung disease present")
-
-    return reasons
-
-def build_prompt(p, reasons):
-    return f"""
-Patient evaluation summary:
-
+Patient:
 Age: {p['age']}
 Diagnosis: {p['diagnosis']}
 Glucose: {p['glucose']}
 BMI: {p['bmi']}
+Heart Failure: {p['heart_failure']}
+Infection: {p['infection']}
+Lung Disease: {p['lung_disease']}
 
-Exclusion reasons detected:
-{", ".join(reasons) if reasons else "None"}
-
-Based on this, explain briefly why the patient is eligible or not eligible.
+Return JSON:
+{{
+    "inclusion_check": "PASS/FAIL",
+    "exclusion_check": "YES/NO",
+    "decision": "ELIGIBLE or NOT_ELIGIBLE",
+    "reason": "1 line explanation"
+}}
 """
 
-def evaluate_with_llm(prompt):
-    return get_eligibility_response(prompt)
+# Parser
+
+def parse_llm_output(result):
+    try:
+        clean = result.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean)
+
+        decision_raw = data.get("decision", "").upper()
+        decision = "ELIGIBLE" if "ELIGIBLE" in decision_raw and "NOT" not in decision_raw else "INELIGIBLE"
+
+        return {
+            "inclusion_check": data.get("inclusion_check", ""),
+            "exclusion_check": data.get("exclusion_check", ""),
+            "decision": decision,
+            "reason": data.get("reason", "")
+        }
+
+    except Exception:
+        return {
+            "inclusion_check": "ERROR",
+            "exclusion_check": "ERROR",
+            "decision": "ERROR",
+            "reason": result
+        }
 
 
-st.title("🧪 Clinical Trial Eligibility Checker")
+# UI
 
-age = st.number_input("Age", 0, 120, 40)
-diagnosis = st.selectbox("Diagnosis", ["Type 2", "Type 1", "Gestational"])
-glucose = st.number_input("Glucose", 120)
-bmi = st.number_input("BMI", 25.0)
-hf = st.selectbox("Heart Failure", ["No", "Yes"])
-inf = st.selectbox("Infection", ["No", "Yes"])
-lung = st.selectbox("Lung Disease", ["No", "Yes"])
+st.title("Clinical Trial Eligibility Checker")
+
+mode = st.radio("Select Mode", ["Single Patient", "Batch CSV Upload"])
 
 
-if st.button("Check Eligibility"):
+# Single Patient
 
-    patient = {
-        "age": age,
-        "diagnosis": diagnosis,
-        "glucose": glucose,
-        "bmi": bmi,
-        "heart_failure": hf,
-        "infection": inf,
-        "lung_disease": lung
-    }
+if mode == "Single Patient":
 
-    st.markdown("### 🧾 Patient Summary")
+    age = st.number_input("Age", 0, 100, 40)
+    diabetes = st.selectbox("Diabetes Type", ["Type 2", "Type 1", "Gestational"])
+    glucose = st.number_input("Glucose (mg/dL)", value=120)
+    bmi = st.number_input("BMI", value=25.0)
+    hf = st.selectbox("Heart Failure?", ["No", "Yes"])
+    inf = st.selectbox("Infection?", ["No", "Yes"])
+    lung = st.selectbox("Lung Disease?", ["No", "Yes"])
 
-    st.write(f"Age: {age}")
-    st.write(f"Diagnosis: {diagnosis}")
-    st.write(f"Glucose: {glucose}")
-    st.write(f"BMI: {bmi}")
-    st.write(f"Heart Failure: {hf}")
-    st.write(f"Infection: {inf}")
-    st.write(f"Lung Disease: {lung}")
+    if st.button("Check Eligibility"):
+
+        patient = {
+            "age": age,
+            "diagnosis": diabetes,
+            "glucose": glucose,
+            "bmi": bmi,
+            "heart_failure": hf,
+            "infection": inf,
+            "lung_disease": lung
+        }
+
+        with st.spinner("Analyzing patient..."):
+            result = get_eligibility_response(build_prompt(patient))
+            data = parse_llm_output(result)
+
+        st.subheader("Result")
+        st.write(f"Inclusion Check: {data['inclusion_check']}")
+        st.write(f"Exclusion Check: {data['exclusion_check']}")
+        st.write(f"Decision: {data['decision']}")
+        st.write(f"Reason: {data['reason']}")
 
 
-    reasons = rule_engine(patient)
+# Batch Mode
 
-    eligible = len(reasons) == 0
+else:
 
-    prompt = build_prompt(patient, reasons)
+    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 
-    explanation = evaluate_with_llm(prompt)
+    if uploaded_file:
+        df = pd.read_csv(uploaded_file)
 
-    
-    st.markdown("### 📊 Result")
+        # Normalize column names
+        df.columns = df.columns.str.strip().str.lower()
 
-    if eligible:
-        st.success("ELIGIBLE")
-    else:
-        st.error("NOT ELIGIBLE")
+        # Map possible variations → clean keys
+        df = df.rename(columns={
+            "heart failure": "heart_failure",
+            "lung disease": "lung_disease"
+        })
 
-    st.write("Reason:")
-    st.write(explanation)
+        required_cols = [
+            "age", "diagnosis", "glucose", "bmi",
+            "heart_failure", "infection", "lung_disease"
+        ]
 
-    st.write("Inclusion Check:", "PASS" if eligible else "FAIL")
-    st.write("Exclusion Check:", "NO" if eligible else "YES")
-    st.write("Confidence:", "100")
+        if not all(col in df.columns for col in required_cols):
+            st.error(f"CSV must contain: {required_cols}")
+            st.write("Your columns:", list(df.columns))
+            st.stop()
+
+        st.write("Preview:")
+        st.dataframe(df.head())
+
+        if st.button("Run Batch Eligibility"):
+
+            results = []
+
+            with st.spinner("Processing batch..."):
+                for _, row in df.iterrows():
+                    patient = {
+                        "age": row["age"],
+                        "diagnosis": row["diagnosis"],
+                        "glucose": row["glucose"],
+                        "bmi": row["bmi"],
+                        "heart_failure": row["heart_failure"],
+                        "infection": row["infection"],
+                        "lung_disease": row["lung_disease"]
+                    }
+
+                    result = get_eligibility_response(build_prompt(patient))
+                    parsed = parse_llm_output(result)
+
+                    results.append({**patient, **parsed})
+
+            result_df = pd.DataFrame(results)
+
+            st.success("Batch processing completed!")
+
+            st.subheader("Batch Results")
+            st.dataframe(result_df)
+
+            csv = result_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download Results CSV",
+                csv,
+                "eligibility_results.csv",
+                "text/csv"
+            )

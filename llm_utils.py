@@ -2,7 +2,10 @@ from groq import Groq
 import streamlit as st
 import os
 
-api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
+try:
+    api_key = st.secrets["GROQ_API_KEY"]
+except Exception:
+    api_key = os.getenv("GROQ_API_KEY")
 
 client = Groq(api_key=api_key)
 
@@ -15,9 +18,9 @@ def get_eligibility_response(prompt: str):
                 {
                     "role": "system",
                     "content": (
-                        "You are a clinical explanation assistant. "
-                        "You only explain given results. "
-                        "Mention all exclusion reasons clearly."
+                        "You are a clinical assistant. "
+                        "Return only valid JSON. "
+                        "Clearly state inclusion, exclusion, decision, and reason."
                     )
                 },
                 {"role": "user", "content": prompt}

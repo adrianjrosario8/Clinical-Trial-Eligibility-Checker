@@ -1,0 +1,9 @@
+Age,Diagnosis,Glucose,BMI,Heart Failure,Infection,Lung Disease
+45,Type 2,150,28,No,No,No
+60,Type 1,200,32,Yes,No,No
+38,Type 2,260,24,No,No,No
+22,Type 2,180,19,No,No,No
+70,Gestational,140,30,No,No,No
+50,Type 2,280,27,No,No,No
+33,Type 2,160,17,No,No,No
+55,Type 2,190,35,Yes,No,No
