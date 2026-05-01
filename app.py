@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit as st 
 import json
 import pandas as pd
 from llm_utils import get_eligibility_response
@@ -40,15 +40,20 @@ Return JSON:
 }}
 """
 
-# Parser
+
+# Parser 
 
 def parse_llm_output(result):
     try:
         clean = result.replace("```json", "").replace("```", "").strip()
         data = json.loads(clean)
 
-        decision_raw = data.get("decision", "").upper()
-        decision = "ELIGIBLE" if "ELIGIBLE" in decision_raw and "NOT" not in decision_raw else "INELIGIBLE"
+        decision_raw = data.get("decision", "").strip().upper()
+
+        if decision_raw == "ELIGIBLE":
+            decision = "ELIGIBLE"
+        else:
+            decision = "INELIGIBLE"
 
         return {
             "inclusion_check": data.get("inclusion_check", ""),
@@ -117,10 +122,8 @@ else:
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
 
-        # Normalize column names
         df.columns = df.columns.str.strip().str.lower()
 
-        # Map possible variations → clean keys
         df = df.rename(columns={
             "heart failure": "heart_failure",
             "lung disease": "lung_disease"
@@ -168,6 +171,7 @@ else:
             st.dataframe(result_df)
 
             csv = result_df.to_csv(index=False).encode("utf-8")
+
             st.download_button(
                 "Download Results CSV",
                 csv,
